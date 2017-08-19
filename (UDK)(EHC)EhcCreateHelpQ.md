@@ -1,6 +1,7 @@
 # EhcCreateHelpQ
 
 ```c
+// Path: \MdeModulePkg\Bus\Pci\EhciDxe\EhciSched.c
 //
 // Create helper QTD/QH for the EHCI device.
 // 
@@ -156,6 +157,7 @@ typedef struct {
 
 # EhcCreateQtd
 ```c
+// Path: \MdeModulePkg\Bus\Pci\EhciDxe\EhciUrb.c
 // 
 // Create a single QTD to hold the data.
 //
@@ -238,13 +240,15 @@ EhcCreateQtd (
     return Qtd;
 }
 ```
+```
 [Comments]
 1. Allocate some memory for a Qtd.
 2. Config Qtd, init Qtd->QtdList, and config the HW QtdHw in the SW Qtd.
 3. Config Page 0 - Page 4 in QtdHw.
-
+```
 # EhcCreateQh
 ```c
+// Path: \MdeModulePkg\Bus\Pci\EhciDxe\EhciUrb.c
 //
 // Allocate and initialize a EHCI queue head.
 //
@@ -265,8 +269,46 @@ EhcCreateQh (
         Qh->NextQh          = NULL;
         Qh->Interval        = Ep->PollRate;
 
+        InitializeListHead (&Qh->Qtds);
 
+        QhHw                = &Qh->QhHw;
+        QhHw->HorizonLink   = QH_LINK (NULL, 0, TRUE);
+        QhHw->DeviceAddr    = Ep->DevAddr;
+        QhHw->Inactive      = 0;
+        QhHw->EpNum         = Ep->EpAddr;
+        QhHw->EpSpeed       = Ep->DevSpeed;
+        QhHw->DtCtrl        = 0;
+        QhHw->ReclaimHead   = 0;
+        QhHw->MaxPacketLen  = (UINT32) Ep->MaxPacket;
+        QhHw->CtrlEp        = 0;
+        QhHw->NakReload     = QH_NAK_RELOAD;
+        QhHw->HubAddr       = Ep->HubAddr;
+        QhHw->PortNum       = Ep->HubPort;
+        QhHw->Multiplier    = 1;
+        QhHw->DataToggle    = Ep->Toggle;
+        
+        if (Ep->DevSpeed != EFI_USB_SPEED_HIGH) 
+            QhHw->Status |= QTD_STAT_DO_SS;  // Status[0] = 0 ???
 
+    // Special init for different transfer type
+    |-- switch (Ep->Type)
+        |-- case EHC_CTRL_TRANSFER:  // Control transfer
+            // Set 1: means control transfer initialize data toggle from each QTD.
+            |-- QhHw->DtCtrl = 1;
+            // Low/Full speed endpoint and Control transfer -> Set Control Endpoint Flag (C) = 1.
+            |-- if (Ep->DevSpeed != EFI_USB_SPEED_HIGH) -> QhHw->CtrlEp = 1;
+        
+        |-- case EHC_INT_TRANSFER_ASYNC:  // Interrupt transfer
+            case EHC_INT_TRANSFER_SYNC:
+            // Software should not use this feature for interrupt queue heads.
+            |-- QhHw->NakReload = 0;  
+                EhcInitIntQh (Ep, QhHw);  // Set the S-Mask and C-Mask
+        
+        |-- case EHC_BULK_TRANSFER:   // Bulk transfer
+            // When High speed and Out, the status[0] bit for the Ping protocol.
+            |-- if Ep->DevSpeed == High_Speed and Ep->Direction == Out -> QhHw->Status |= QTD_STAT_DO_PING;
+    
+    return Qh;            
 }
 ```
 
